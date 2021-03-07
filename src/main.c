@@ -175,7 +175,7 @@ Please check your input file!\n",thisroutine);
 
   }
   fclose(fm);
-  //printf("CT = %lf\t CP = %lf\n",rotor.CT, rotor.CP);
+  printf("CT = %lf\t CP = %lf\n",rotor.CT, rotor.CP);
 
 
 

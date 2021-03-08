@@ -47,6 +47,7 @@ Please check your input file!\n",thisroutine);
                       %lf%*[^\n] \
                       %lf%*[^\n] \
                       %lf%*[^\n] \
+                      %lf%*[^\n] \
                       %lf%*[^\n]\n", \
                       caseIN.caseName,\
                       &caseIN.runID,\
@@ -64,6 +65,7 @@ Please check your input file!\n",thisroutine);
                       skipLine,\
                       &atm.Pressure,\
                       &atm.Temp,\
+                      &atm.rho,\
                       &atm.DynViscos,\
                       &atm.RelativeHumi)){};
   fclose(fp);
@@ -170,11 +172,15 @@ Please check your input file!\n",thisroutine);
     fprintf(fm,"%8.4f  %8.4f  %8.4f  %8.4f  %8.4f  %8.4f %8.4f %8.4f %8.4f\n",sTube.r_R\
              ,sTube.a,sTube.a_p,sTube.F_n,sTube.F_t,sTube.gamma, sTube.AoA, sTube.Cl, sTube.Cd);
     double dr=(rotor.BGeom.r_R[i+1]-rotor.BGeom.r_R[i])*rotor.R;
-    rotor.CT +=dr*sTube.r_R*rotor.NB/(0.5*rotor.Vinf*rotor.Vinf*PI*rotor.R*rotor.R);
-    rotor.CP +=dr*sTube.F_n*sTube.a_p*rotor.NB*rotor.R*rotor.omega/(0.5*rotor.Vinf*rotor.Vinf*rotor.Vinf*PI*rotor.R*rotor.R);
+    rotor.CT +=dr*sTube.F_n*rotor.NB/(0.5*pow(rotor.Vinf,2)*PI*pow(rotor.R,2));
+    rotor.CP +=dr*sTube.F_t*sTube.r_R*rotor.NB*rotor.R*rotor.omega/(0.5*pow(rotor.Vinf,3)*rotor.Vinf*PI*pow(rotor.R,2));
 
   }
   fclose(fm);
+  if(DEBUG==1){
+    printf("Omega = %lf\n",rotor.omega);
+    printf(" Cp = 2/TSR*CT = %lf\n",(2/rotor.TSR*rotor.CT));
+  }
   printf("CT = %lf\t CP = %lf\n",rotor.CT, rotor.CP);
 
 

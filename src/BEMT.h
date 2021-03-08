@@ -86,7 +86,7 @@
     double DynViscos;// [Pa*s]
     double RelativeHumi; // for atmospheric sound attenuation [%]
     double Z;
-    double Rho;
+    double rho;
   }ATMData;
 
   typedef struct{

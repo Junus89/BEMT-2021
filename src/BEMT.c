@@ -1596,19 +1596,7 @@ char* cutoffstr(const char* str,\
   double inflowangle = atan2(v_n,v_t);
   double alpha = twist + inflowangle*180.0/PI;
   double Cl=0.0, Cd=0.0;
-/*
-    ratint(polar.AoA,\
-           polar.Cl,\
-           numPolar,\
-           alpha,
-           &Cl);
 
-    ratint(polar.AoA,\
-           polar.Cd,\
-           numPolar,\
-           alpha,
-           &Cd);
-*/
   cspline(polar.AoA, polar.Cl, numPolar, (polar.Cl[1]-polar.Cl[0]) \
           ,(polar.Cl[numPolar-1]-polar.Cl[numPolar-2]), alpha, &Cl);
   cspline(polar.AoA, polar.Cd, numPolar, (polar.Cd[1]-polar.Cl[0]) \
@@ -1622,7 +1610,7 @@ char* cutoffstr(const char* str,\
   double drag = 0.5*vmag2*Cd*chord;
   bladeF.F_n=lift*cos(inflowangle)+drag*sin(inflowangle);
   bladeF.F_t=lift*sin(inflowangle)-drag*cos(inflowangle);
-  bladeF.gamma=0.5*pow(vmag2,0.5)*Cl*chord;
+  bladeF.gamma=0.5*sqrt(vmag2)*Cl*chord;
   bladeF.AoA=alpha;
   bladeF.Cl=Cl;
   bladeF.Cd=Cd;
@@ -1652,7 +1640,7 @@ char* cutoffstr(const char* str,\
   double Area = PI*(pow(r2_R*rotor.R,2)-pow(r1_R*rotor.R,2)); /* area streamtube */
   double r_R = (r1_R+r2_R)/2; /* centroide */
   /* initiatlize variables */
-  double a = 0.0; /* axial induction */
+  double a = 0.30; /* axial induction */
   double aline = 0.0; /* tangential induction factor */
     
   int Niter = 100;

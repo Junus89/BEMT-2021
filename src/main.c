@@ -177,9 +177,8 @@ Please check your input file!\n",thisroutine);
 
   }
   fclose(fm);
-  if(DEBUG==1){
+  if(DEBUG==0){
     printf("Omega = %lf\n",rotor.omega);
-    printf(" Cp = 2/TSR*CT = %lf\n",(2/rotor.TSR*rotor.CT));
   }
   printf("CT = %lf\t CP = %lf\n",rotor.CT, rotor.CP);
 

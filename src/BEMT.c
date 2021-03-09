@@ -1531,13 +1531,13 @@ char* cutoffstr(const char* str,\
   double CT1=1.816;
   double CT2=2*sqrt(CT1)-CT1;
   if(CT>=CT2){
-    a=1 + (CT-CT1)/(4*(pow(CT1,2)-1));
+    a=1 + (CT-CT1)/(4*(sqrt(CT1)-1));
   }
   else if(CT<CT2){
     a = 0.5-0.5*sqrt(1-CT);
   }
   return a;
-}
+ }
 
   PrndlCorr PrandtlTipRootCorrection(RotorData rotor, 
                                      double r_R, 
@@ -1562,11 +1562,11 @@ char* cutoffstr(const char* str,\
     
   }
   
-  PrndlCorr Pcorr; double Froot=0.0, Ftip=0.0, temp1=0.0;
-  temp1 = -rotor.NB/2*(tipradius_R-r_R)/r_R*sqrt(1+pow((rotor.TSR*r_R),2)/(pow((1-axial_induction),2)));
+  PrndlCorr Pcorr; double Froot=0.0, Ftip=0.0, temp1=0.0, temp2=0.0;
+  temp1=-rotor.NB/2*(tipradius_R-r_R)/r_R*sqrt(1+pow((rotor.TSR*r_R),2)/(pow((1-axial_induction),2)));
   Ftip=2/PI*acos(exp(temp1));
-  temp1 = rotor.NB/2*(rootradius_R-r_R)/r_R*sqrt(1+pow((rotor.TSR*r_R),2)/(pow((1-axial_induction),2)));
-  Froot=2/PI*acos(exp(temp1));
+  temp2=rotor.NB/2*(rootradius_R-r_R)/r_R*sqrt(1+pow((rotor.TSR*r_R),2)/(pow((1-axial_induction),2)));
+  Froot=2/PI*acos(exp(temp2));
 
   Pcorr.PrandtlRxT=Froot*Ftip;
   Pcorr.PrandtlRoot=Froot;
@@ -1593,8 +1593,12 @@ char* cutoffstr(const char* str,\
   /*reading and getting the polar data */
   if(code!=0) BEMT_error("error in reading input file in routine %s\n",thisroutine);
   double vmag2 = v_n*v_n + v_t*v_t;
+  //printf("vmag2 = %lf\n",vmag2);
   double inflowangle = atan2(v_n,v_t);
-  double alpha = twist + inflowangle*180.0/PI;
+  //printf("phi = %lf\n",inflowangle);
+  double alpha =inflowangle*180.0/PI-twist;
+  //printf("twist = %lf\n",twist);
+  //printf("alpha = %lf\n",alpha);
   double Cl=0.0, Cd=0.0;
 
   cspline(polar.AoA, polar.Cl, numPolar, (polar.Cl[1]-polar.Cl[0]) \
@@ -1640,20 +1644,13 @@ char* cutoffstr(const char* str,\
   double Area = PI*(pow(r2_R*rotor.R,2)-pow(r1_R*rotor.R,2)); /* area streamtube */
   double r_R = (r1_R+r2_R)/2; /* centroide */
   /* initiatlize variables */
-  double a = 0.30; /* axial induction */
-  double aline = 0.0; /* tangential induction factor */
+  double a = 0.10; /* axial induction */
+  double aline = 0.10; /* tangential induction factor */
+  
     
-  int Niter = 100;
+  int Niter = 1000;
   /* */
-/*
-   sTube.a=NULL;sTube.a=dvector(0,Niter);
-   sTube.a_p=NULL;sTube.a_p=dvector(0,Niter);
-   sTube.r_R=NULL;sTube.r_R=dvector(0,Niter);
-   sTube.F_n=NULL;sTube.F_n=dvector(0,Niter);
-   sTube.F_t=NULL;sTube.F_t=dvector(0,Niter);
-   sTube.gamma=NULL;sTube.gamma=dvector(0,Niter);
-*/
-  double Erroriterations =0.00001; /* error limit for iteration rpocess, in absolute value of induction */
+  double Erroriterations =0.9e-7; /* error limit for iteration rpocess, in absolute value of induction */
   double Vrotor=0.0, Vtan=0.0, load3Daxial=0.0, CT=0.0, TSR=0.0;
   for(int i=0;i<Niter;i++){
     //printf(" i =%d\n",i);
@@ -1668,7 +1665,9 @@ char* cutoffstr(const char* str,\
     load3Daxial =BForce.F_n*rotor.R*(r2_R-r1_R)*rotor.NB; /* 3D force in axial direction */
     /*Calculate new estimate of axial and azimuthal induction */
     /* calculate thrust coefficient at the streamtube */
+    //printf(" load3D = %lf\n",load3Daxial);
     CT = load3Daxial/(0.5*Area*rotor.Vinf*rotor.Vinf);
+    //printf("CT = %lf\n",CT);
     anew=ainduction(CT);
     /* correct new axial induction with Prandtl's correction */
     //TSR=omega*rotor.R/rotor.Vinf;
@@ -1680,6 +1679,15 @@ char* cutoffstr(const char* str,\
     aline = BForce.F_t*rotor.NB/(2*PI*rotor.Vinf*(1-a)*omega*2*pow((r_R*rotor.R),2));
     aline =aline/Pcorr.PrandtlRxT; /* correct estimate of azimuthal induction with Prandtl's correction */
     // test convergence of solution, by checking convergence of axial induction
+
+    if (fabs(a-anew) < Erroriterations){
+    if(DEBUG==0){
+      printf("iterations %d    a-anew = %lf\n",i,fabs(a-anew));
+      printf(" a\t %lf ap\t %lf r_R\t %lf F_n\t %lf F_t\t %lf gamma\t %lf\n",a\
+             ,aline,r_R,BForce.F_n,BForce.F_t,BForce.gamma);
+      }
+       break;
+    }
     sTube.a=a;if(a==0.0/0.0) sTube.a=0.0;
     sTube.a_p=aline;if(aline==0.0/0.0) sTube.a_p=0.0;
     sTube.r_R=r_R;
@@ -1689,15 +1697,7 @@ char* cutoffstr(const char* str,\
     sTube.AoA=BForce.AoA;
     sTube.Cl=BForce.Cl;
     sTube.Cd=BForce.Cd;
-    if(DEBUG==0){
-      if (fabs(a-anew) < Erroriterations){ 
-      printf("iterations %d    a-anew = %lf\n",i,fabs(a-anew));
-      
-      printf(" a\t %lf ap\t %lf r_R\t %lf F_n\t %lf F_t\t %lf gamma\t %lf\n",a\
-             ,aline,r_R,BForce.F_n,BForce.F_t,BForce.gamma);
-      }
-    }
-}
+  }
 
   return sTube;
 }

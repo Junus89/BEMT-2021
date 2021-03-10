@@ -136,14 +136,16 @@ Please check your input file!\n",thisroutine);
   streamTube sTube;
 
   double chord=0.0, twist=0.0,r_R=0.0;
+  double CT=0.0, CP=0.0;
   FILE *fm;
   char fnm[256];strcpy(fnm,caseIN.caseName);
 
   strcat(fnm,"_Restuls.txt");
   fm=fopen(fnm,"w");
   
-  fprintf(fm,"%8s %8s %8s %8s %8s %8s %8s %8s %8s\n","r/R", "a", "a'", "Fn [N]", "Ft[N]", "Gamma", "AoA", "Cl", "Cd");
+  fprintf(fm,"%8s %8s %8s %8s %8s %8s %8s %8s %8s %8s %8s\n","r/R", "a", "a'", "Fn [N]", "Ft[N]", "CT", "CP","Gamma", "AoA", "Cl", "Cd");
   for(int i=0;i<rotor.BGeom.NumStations-1;i++){
+  CT=0.0, CP=0.0;
     r_R=(rotor.BGeom.r_R[i]+rotor.BGeom.r_R[i+1])/2;
     ratint(rotor.BGeom.r_R,rotor.BGeom.c_R,rotor.BGeom.NumStations,r_R,&chord);
     ratint(rotor.BGeom.r_R,rotor.BGeom.twist,rotor.BGeom.NumStations,r_R,&twist);
@@ -169,11 +171,13 @@ Please check your input file!\n",thisroutine);
     if(sTube.Cl!=sTube.Cl) sTube.Cl=0.0;
     if(sTube.Cd!=sTube.Cd) sTube.Cd=0.0;
 
-    fprintf(fm,"%8.4f  %8.4f  %8.4f  %8.4f  %8.4f  %8.4f %8.4f %8.4f %8.4f\n",sTube.r_R\
-             ,sTube.a,sTube.a_p,sTube.F_n,sTube.F_t,sTube.gamma, sTube.AoA, sTube.Cl, sTube.Cd);
     double dr=(rotor.BGeom.r_R[i+1]-rotor.BGeom.r_R[i])*rotor.R;
-    rotor.CT +=dr*sTube.F_n*rotor.NB/(0.5*pow(rotor.Vinf,2)*PI*pow(rotor.R,2));
-    rotor.CP +=dr*sTube.F_t*sTube.r_R*rotor.NB*rotor.R*rotor.omega/(0.5*pow(rotor.Vinf,3)*rotor.Vinf*PI*pow(rotor.R,2));
+
+    CT=dr*sTube.F_n*rotor.NB/(0.5*pow(rotor.Vinf,2)*PI*pow(rotor.R,2));
+    CP=dr*sTube.F_t*sTube.r_R*rotor.NB*rotor.R*rotor.omega/(0.5*pow(rotor.Vinf,3)*rotor.Vinf*PI*pow(rotor.R,2));
+    rotor.CT+=CT; rotor.CP+=CP;
+    fprintf(fm,"%8.4f  %8.4f  %8.4f  %8.4f  %8.4f  %8.4f  %8.4f  %8.4f  %8.4f  %8.4f %8.4f\n",sTube.r_R\
+             ,sTube.a,sTube.a_p,sTube.F_n,sTube.F_t,CT,CP,sTube.gamma, sTube.AoA, sTube.Cl, sTube.Cd);
 
   }
   fclose(fm);

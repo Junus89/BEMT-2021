@@ -1591,19 +1591,14 @@ char* cutoffstr(const char* str,\
   }
   bladeForce bladeF;
   /*reading and getting the polar data */
-  if(code!=0) BEMT_error("error in reading input file in routine %s\n",thisroutine);
   double vmag2 = v_n*v_n + v_t*v_t;
-  //printf("vmag2 = %lf\n",vmag2);
   double inflowangle = atan2(v_n,v_t);
-  //printf("phi = %lf\n",inflowangle);
   double alpha =inflowangle*180.0/PI-twist;
-  //printf("twist = %lf\n",twist);
-  //printf("alpha = %lf\n",alpha);
   double Cl=0.0, Cd=0.0;
 
   cspline(polar.AoA, polar.Cl, numPolar, (polar.Cl[1]-polar.Cl[0]) \
           ,(polar.Cl[numPolar-1]-polar.Cl[numPolar-2]), alpha, &Cl);
-  cspline(polar.AoA, polar.Cd, numPolar, (polar.Cd[1]-polar.Cl[0]) \
+  cspline(polar.AoA, polar.Cd, numPolar, (polar.Cd[1]-polar.Cd[0]) \
           ,(polar.Cd[numPolar-1]-polar.Cd[numPolar-2]), alpha, &Cd);
 
   if(DEBUG==0){
@@ -1641,23 +1636,24 @@ char* cutoffstr(const char* str,\
   bladeForce BForce;
   double anew=0.0;
 
-  double Area = PI*(pow(r2_R*rotor.R,2)-pow(r1_R*rotor.R,2)); /* area streamtube */
+  double AnularRingArea = PI*(pow(r2_R*rotor.R,2)-pow(r1_R*rotor.R,2)); /* area streamtube */
   double r_R = (r1_R+r2_R)/2; /* centroide */
   /* initiatlize variables */
-  double a = 0.10; /* axial induction */
-  double aline = 0.10; /* tangential induction factor */
+  double a = 0.30; /* axial induction */
+  double aline = 0.0; /* tangential induction factor */
   
     
   int Niter = 1000;
   /* */
-  double Erroriterations =0.9e-7; /* error limit for iteration rpocess, in absolute value of induction */
+  double Erroriterations =0.9e-10; /* error limit for iteration rpocess, in absolute value of induction */
   double Vrotor=0.0, Vtan=0.0, load3Daxial=0.0, CT=0.0, TSR=0.0;
   for(int i=0;i<Niter;i++){
-    //printf(" i =%d\n",i);
-    /* calculate the velocity and loads at blade element */
-    Vrotor = rotor.Vinf*(1-a); /* axial velocity at rotor */
-    //printf(" vrotor = %lf\n",Vrotor);
-    Vtan = (1+aline)*omega*r_R*rotor.R; /* tangential velocity at rotor */
+     /* calculate the velocity and loads at blade element */
+    //Vrotor = rotor.Vinf*(1-a); /* axial velocity at rotor */
+    Vrotor=rotor.Vinf*(cos(rotor.yawAngle*PI/180)-a);
+     //printf(" vrotor = %lf\n",Vrotor);
+    //Vtan = (1+aline)*omega*r_R*rotor.R; /* tangential velocity at rotor */
+    Vtan=(cos(rotor.yawAngle*PI/180)+aline)*omega*r_R*rotor.R;
     //printf(" Vtan = %lf\n",Vtan);
     /* calculate loads in blade segment in 2D (N/m) */
     BForce=loadBladeElement(Vrotor,Vtan,chord,twist,numPolar,polar);
@@ -1666,11 +1662,10 @@ char* cutoffstr(const char* str,\
     /*Calculate new estimate of axial and azimuthal induction */
     /* calculate thrust coefficient at the streamtube */
     //printf(" load3D = %lf\n",load3Daxial);
-    CT = load3Daxial/(0.5*Area*rotor.Vinf*rotor.Vinf);
+    CT = load3Daxial/(0.5*AnularRingArea*rotor.Vinf*rotor.Vinf);
     //printf("CT = %lf\n",CT);
     anew=ainduction(CT);
     /* correct new axial induction with Prandtl's correction */
-    //TSR=omega*rotor.R/rotor.Vinf;
     Pcorr=PrandtlTipRootCorrection(rotor,r_R, rootR, tipR,anew);
     if(Pcorr.PrandtlRxT<0.0001) Pcorr.PrandtlRxT=0.0001;/* avoid devide by zero */
     anew=anew/Pcorr.PrandtlRxT;/*correct estimate of axial induction */
@@ -1678,8 +1673,7 @@ char* cutoffstr(const char* str,\
     /* calculate azimuthal/tangential induction*/
     aline = BForce.F_t*rotor.NB/(2*PI*rotor.Vinf*(1-a)*omega*2*pow((r_R*rotor.R),2));
     aline =aline/Pcorr.PrandtlRxT; /* correct estimate of azimuthal induction with Prandtl's correction */
-    // test convergence of solution, by checking convergence of axial induction
-
+    /* test convergence of solution, by checking convergence of axial induction*/
     if (fabs(a-anew) < Erroriterations){
     if(DEBUG==0){
       printf("iterations %d    a-anew = %lf\n",i,fabs(a-anew));

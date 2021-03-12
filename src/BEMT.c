@@ -1520,6 +1520,9 @@ char* cutoffstr(const char* str,\
   }
 /*===================================================================*/
 /*                                                                   */
+/*                          BEMT ROUTINES IN USE                     */
+/*                                                                   */
+/*===================================================================*/
 
   double ainduction(double CT)
   {
@@ -1548,8 +1551,14 @@ char* cutoffstr(const char* str,\
   /*
   This function calcualte steh combined tip and root Prandtl correction
   at agiven radial position 'r_R' (non-dimensioned by rotor radius), 
-  given a root and tip radius (also non-dimensioned), a tip speed ratio
+  given a rotor data that contains root and tip radius 
+  (also non-dimensioned), a tip speed ratio
   TSR, the number lf blades NBlades and the axial induction factor
+  The correction factor F can be written as:
+                                                                       
+    F=2/PI*arccos(exp(-f)), where     f=B/2*(R-r)/(r*sin(inflowAngle)) 
+                                                                       
+  
   */
   const char* thisroutine="PrandtlTipRootCorrection";
   double TINY=1.0e-25;
@@ -1568,12 +1577,40 @@ char* cutoffstr(const char* str,\
   temp2=rotor.NB/2*(rootradius_R-r_R)/r_R*sqrt(1+pow((rotor.TSR*r_R),2)/(pow((1-axial_induction),2)));
   Froot=2/PI*acos(exp(temp2));
 
-  Pcorr.PrandtlRxT=Froot*Ftip;
   Pcorr.PrandtlRoot=Froot;
   Pcorr.PrandtlTip=Ftip;
-  return Pcorr;
+  Pcorr.PrandtlRxT=Froot*Ftip;
 
- }
+  return Pcorr;
+  }
+
+  SkewedWakeCorr WakeCorr(RotorData rotor, 
+                          double Vx,\
+                          double Vy,\
+                          double azimuth,\
+                          double r_R,\
+                          double a)
+  {
+  /* 
+  */
+  char *thisroutine="WakeCorr";
+  SkewedWakeCorr SWCorr;
+  SWCorr.skewAngle=rotor.yawAngle*PI/180;
+  double yawCorr=0.0;
+  double sineOfAz=sin(azimuth*PI/180);
+  if(fabs(sineOfAz>0.005)){
+    SWCorr.skewAngle=(0.6*a+1.0)*rotor.yawAngle*PI/180;
+    yawCorr=(15.0*PI/32.0+tan(SWCorr.skewAngle/2.0)*r_R*sineOfAz);
+    SWCorr.a=a*(1.0+yawCorr);
+    if(DEBUG==1)printf(" axial induction: before %lf updated %lf from routine %s\n",a,SWCorr.a,thisroutine);
+  }else{
+    if(DEBUG==0)printf(" got a as it is\n");
+    SWCorr.a=a;
+    SWCorr.skewAngle=rotor.yawAngle;
+  }
+  return SWCorr;
+  }
+
   bladeForce loadBladeElement(double v_n,\
                               double v_t,\
                               double chord,\
@@ -1595,7 +1632,7 @@ char* cutoffstr(const char* str,\
   double inflowangle = atan2(v_n,v_t);
   double alpha =inflowangle*180.0/PI-twist;
   double Cl=0.0, Cd=0.0;
-
+  /* interpolate Cl and Cd at alpha */
   cspline(polar.AoA, polar.Cl, numPolar, (polar.Cl[1]-polar.Cl[0]) \
           ,(polar.Cl[numPolar-1]-polar.Cl[numPolar-2]), alpha, &Cl);
   cspline(polar.AoA, polar.Cd, numPolar, (polar.Cd[1]-polar.Cd[0]) \
@@ -1633,6 +1670,7 @@ char* cutoffstr(const char* str,\
 */
   streamTube sTube;
   PrndlCorr Pcorr;
+  SkewedWakeCorr YawCorr;
   bladeForce BForce;
   double anew=0.0;
 
@@ -1649,11 +1687,11 @@ char* cutoffstr(const char* str,\
   double Vrotor=0.0, Vtan=0.0, load3Daxial=0.0, CT=0.0, TSR=0.0;
   for(int i=0;i<Niter;i++){
      /* calculate the velocity and loads at blade element */
-    //Vrotor = rotor.Vinf*(1-a); /* axial velocity at rotor */
-    Vrotor=rotor.Vinf*(cos(rotor.yawAngle*PI/180)-a);
-     //printf(" vrotor = %lf\n",Vrotor);
-    //Vtan = (1+aline)*omega*r_R*rotor.R; /* tangential velocity at rotor */
-    Vtan=(cos(rotor.yawAngle*PI/180)+aline)*omega*r_R*rotor.R;
+    Vrotor = rotor.Vinf*(1-a); /* axial velocity at rotor */
+    //Vrotor=rotor.Vinf*(cos(rotor.yawAngle*PI/180)-a);
+    //printf(" vrotor = %lf\n",Vrotor);
+    Vtan = (1+aline)*omega*r_R*rotor.R; /* tangential velocity at rotor */
+    //Vtan=(cos(rotor.yawAngle*PI/180)+aline)*omega*r_R*rotor.R;
     //printf(" Vtan = %lf\n",Vtan);
     /* calculate loads in blade segment in 2D (N/m) */
     BForce=loadBladeElement(Vrotor,Vtan,chord,twist,numPolar,polar);
@@ -1666,9 +1704,21 @@ char* cutoffstr(const char* str,\
     //printf("CT = %lf\n",CT);
     anew=ainduction(CT);
     /* correct new axial induction with Prandtl's correction */
-    Pcorr=PrandtlTipRootCorrection(rotor,r_R, rootR, tipR,anew);
+    Pcorr=PrandtlTipRootCorrection(rotor,\
+                                   r_R,\
+                                   rootR,\
+                                   tipR,\
+                                   anew);
     if(Pcorr.PrandtlRxT<0.0001) Pcorr.PrandtlRxT=0.0001;/* avoid devide by zero */
     anew=anew/Pcorr.PrandtlRxT;/*correct estimate of axial induction */
+    /* apply yaw correction */
+    YawCorr=WakeCorr(rotor, 
+                     Vrotor,\
+                     Vtan,\
+                     rotor.yawAngle,\
+                     r_R,\
+                     anew);
+    anew=YawCorr.a;
     a=0.75*a+0.25*anew; /* for improving convergence, weigh current and previous iteration of axial induction */
     /* calculate azimuthal/tangential induction*/
     aline = BForce.F_t*rotor.NB/(2*PI*rotor.Vinf*(1-a)*omega*2*pow((r_R*rotor.R),2));

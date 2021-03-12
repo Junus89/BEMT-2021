@@ -239,6 +239,13 @@
   }PrndlCorr;
 
   typedef struct{
+    double a;
+    double a_p;
+    double skewAngle;
+    double wakeAngle;
+  }SkewedWakeCorr;
+
+  typedef struct{
     double *AoA;
     double *Cl;
     double *Cd;
@@ -429,6 +436,13 @@
                                      double rootradius_R, 
                                      double tipradius_R, 
                                      double axial_induction);
+
+  SkewedWakeCorr WakeCorr(RotorData rotor, 
+                          double Vx,\
+                          double Vy,\
+                          double azimuth,\
+                          double r_R,\
+                          double a;
 
   RotorData getBladeGeom(RotorData rotor, caseData caseIN);
 

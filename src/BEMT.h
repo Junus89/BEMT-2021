@@ -203,14 +203,12 @@
 
 
   typedef struct{
-    //double r_R;   /* Non-dimensional radial distance [-] */
-    //double c_R;   /* chord distribution [-] */
-    //double theta; /* geometric pitch angle [rad] */
     double R;     /* Propeller Diameter [m] */
     double hubR;  /* hub radius [m] */
     double tipR;  /* tip radius [m] */
     int    NB;    /* Number of blades */
-    int    RPM;   /* rotor RPM [-] */
+    double RPM;   /* rotor RPM [-] */
+    double J;     /* Advance ratio [-] */
     double omega; /* rotor rotational speed [rad/s] */
     double TSR;   /* Tip Speed Ratio (Lambda) */
     double Vinf;  /* Free stream velocity */
@@ -219,7 +217,11 @@
     char polarDataFN[256]; /* File name of the polar data file */
     BladeGeom BGeom;
     double CT;
+    double CQ;
     double CP;
+    double Thrust;
+    double Torque;
+    double Power;
     caseData caseIN;
   }RotorData;
 
@@ -227,6 +229,7 @@
     double F_n;
     double F_t;
     double gamma;
+    double phi;
     double AoA;
     double Cl;
     double Cd;
@@ -260,6 +263,7 @@
     double F_n;
     double F_t;
     double gamma;
+    double phi;
     double AoA;
     double Cl;
     double Cd;
@@ -279,6 +283,10 @@
     foundmin=1,\
     foundmax=2,\
     finished=3
+  };
+  enum WTorProp{
+    Windturbine=0,\
+    Propeller=1
   };
 
   void BEMT_error(char error_text[],\
@@ -403,6 +411,7 @@
   double CubicSplineInterps (double X, int AryLen, double XAry[], double YAry[], double **Coef, double InterpdVal);
   int LocateBin( double XVal, double XAry[], int AryLen);
 
+  double root2nd(double a, double b, double c,int PorN);
 
   double *diff(double *vec,\
                int N);
@@ -435,23 +444,49 @@
                                      double r_R, 
                                      double rootradius_R, 
                                      double tipradius_R, 
+                                     double axial_induction,
+                                     double phi);
+
+  PrndlCorr PrandtlTipRootCorrectionWT(RotorData rotor,
+                                     double r_R,
+                                     double rootradius_R,
+                                     double tipradius_R,
                                      double axial_induction);
+
+  PrndlCorr PrandtlTipRootCorrectionYF(RotorData rotor,
+                                     double r_R,
+                                     double phi);
 
   SkewedWakeCorr WakeCorr(RotorData rotor, 
                           double Vx,\
                           double Vy,\
                           double azimuth,\
                           double r_R,\
-                          double a;
+                          double a);
 
   RotorData getBladeGeom(RotorData rotor, caseData caseIN);
+
+  double flowExpansionFOyer(double r_R);
+
+  double inflowAngleInYaw(RotorData rotor, double r_R, double a, double aprime, double Psi);
 
   bladeForce loadBladeElement(double v_n,\
                               double v_t,\
                               double chord,\
                               double twist,\
                               int numPolar,\
-                              polarData polar);
+                              polarData polar,\
+                              int runID);
+
+  bladeForce loadBladeElementInYaw(double inflowAnlgeInYawInDeg,
+                                   double Vrel,\
+                                   double Psi,\
+                                   double chord,\
+                                   double twist,\
+                                   int numPolar,\
+                                   polarData polar,\
+                                   int runID);
+
 
   streamTube solveStreamTube(RotorData rotor,\
                              double r1_R,\
@@ -464,6 +499,18 @@
                              int numPolar,\
                              polarData polar);
 
+  streamTube solveStreamTubeInWake(RotorData rotor,\
+                                   double r1_R,\
+                                   double r2_R,\
+                                   double rootR,\
+                                   double tipR,\
+                                   double omega,\
+                                   double chord,\
+                                   double twist,\
+                                   int numPolar,\
+                                   polarData polar);
+
+  void BEMT(RotorData rotor, ATMData atm, polarData polar, int numPolar,caseData caseIN);
 /* */
   double get_cpu_time(clock_t start,\
                       clock_t end);

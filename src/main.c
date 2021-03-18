@@ -15,7 +15,7 @@ int main(int argc, char **argv)
   double cpu_time;
   start=clock();
   /*reading input file */
-  const char* thisroutine="int main(...)";
+  const char* thisroutine="main";
   /* input data declerations */
   caseData        caseIN;
   RotorData       rotor;
@@ -43,6 +43,7 @@ Please check your input file!\n",thisroutine);
                       %s%*[^\n] \
                       %lf%*[^\n] \
                       %lf%*[^\n] \
+                      %lf%*[^\n] \
                       %s%*[^\n] \
                       %lf%*[^\n] \
                       %lf%*[^\n] \
@@ -62,6 +63,7 @@ Please check your input file!\n",thisroutine);
                       skipLine,\
                       &rotor.Vinf,\
                       &rotor.TSR,\
+                      &rotor.RPM,\
                       skipLine,\
                       &atm.Pressure,\
                       &atm.Temp,\
@@ -87,6 +89,8 @@ Please check your input file!\n",thisroutine);
   printf("---------------------------------------------------\n");
 /* */
   /*reading and getting the polar data */
+  rotor.caseIN.runID=caseIN.runID;
+  
   int numPolarP;
   d4_t *polar=NULL;polar=polarDataReader(rotor.polarDataFN,&numPolarP);
   polarData Polar;
@@ -113,45 +117,53 @@ Please check your input file!\n",thisroutine);
     for(int i=0;i<numPolarP;i++){
       alpha=0.01*i+1.4-0.5*i;
       //printf("%d %lf %lf %lf %lf\n",i,Coef[i][0],Coef[i][1],Coef[i][2],Coef[i][3]);
-/*      ratint(Polar.AoA,\
-             Polar.Cl,\
-             numPolarP,\
-             alpha,
-             &Cl);
-*/
-    
       cspline(Polar.AoA, Polar.Cl, numPolarP, (Polar.Cl[1]-Polar.Cl[0]) \
               ,(Polar.Cl[numPolarP-1]-Polar.Cl[numPolarP-2]), alpha, &Cl);
 
-     printf(" alpha = %lf interpCL = %lf\n",alpha,Cl);
-      //printf(" alpha = %lf interCD = %lf\n",alpha,Cd);
+     //printf(" alpha = %lf interpCL = %lf\n",alpha,Cl);
+     //printf(" alpha = %lf interCD = %lf\n",alpha,Cd);
     }
   }
   /* compute and generate the blade geometry */
   rotor=getBladeGeom(rotor,caseIN);
-  rotor.omega=rotor.Vinf*rotor.TSR/rotor.R;
+
+  enum WTorProp WTP=caseIN.runID;
+  switch(WTP){
+    case(Windturbine):
+      rotor.omega=rotor.Vinf*rotor.TSR/rotor.R;
+      break;
+    case(Propeller):
+      rotor.omega=rotor.RPM/(30.0/PI);
+      rotor.J=rotor.Vinf/(rotor.RPM/60*rotor.R*2);
+      printf("rotor RPM %lf rotor omega %lf J %lf\n",rotor.RPM,rotor.omega, rotor.J);
+      break;
+    default:
+      BEMT_error("Please specify run ID: 0->WT; 1-> Prop\n",thisroutine);
+  }
   //printf("%lf\n",rotor.BGeom.r_R[0]);
 
   /* compute stream tube */
   streamTube sTube;
-
+if(DEBUG==1){
   double chord=0.0, twist=0.0,r_R=0.0;
-  double CT=0.0, CP=0.0;
+  double CT_r=0.0, CP_r=0.0,CQ_r=0.0;
   FILE *fm;
   char fnm[256];strcpy(fnm,caseIN.caseName);
 
   strcat(fnm,"_Restuls.txt");
   fm=fopen(fnm,"w");
   
-  fprintf(fm,"%8s %8s %8s %8s %8s %8s %8s %8s %8s %8s %8s\n","r/R", "a", "a'", "Fn [N]", "Ft[N]", "CT", "CP","Gamma", "AoA", "Cl", "Cd");
+  fprintf(fm,"%8s %8s %8s %8s %8s %8s %8s %8s %8s %8s %8s %8s\n","r/R"\
+    ,"a","a'","Fn [N]","Ft[N]","CT","CQ","CP","Phi","AoA","Cl","Cd");
   for(int i=0;i<rotor.BGeom.NumStations-1;i++){
-  CT=0.0, CP=0.0;
+  //for(int i=0;i<1;i++){
+  CT_r=0.0, CQ_r=0.0,CP_r=0.0;
     r_R=(rotor.BGeom.r_R[i]+rotor.BGeom.r_R[i+1])/2;
     ratint(rotor.BGeom.r_R,rotor.BGeom.c_R,rotor.BGeom.NumStations,r_R,&chord);
     ratint(rotor.BGeom.r_R,rotor.BGeom.twist,rotor.BGeom.NumStations,r_R,&twist);
     if(DEBUG==0) printf(" r/R = %lf chod = %lf twist = %lf\n",r_R, chord, twist);
 
-    sTube=solveStreamTube(rotor,\
+    sTube=solveStreamTubeInWake(rotor,\
                           rotor.BGeom.r_R[i],\
                           rotor.BGeom.r_R[i+1],\
                           rotor.hubR,\
@@ -173,21 +185,33 @@ Please check your input file!\n",thisroutine);
 
     double dr=(rotor.BGeom.r_R[i+1]-rotor.BGeom.r_R[i])*rotor.R;
 
-    CT=dr*sTube.F_n*rotor.NB/(0.5*pow(rotor.Vinf,2)*PI*pow(rotor.R,2));
-    CP=dr*sTube.F_t*sTube.r_R*rotor.NB*rotor.R*rotor.omega/(0.5*pow(rotor.Vinf,3)*rotor.Vinf*PI*pow(rotor.R,2));
-    rotor.CT+=CT; rotor.CP+=CP;
-    fprintf(fm,"%8.4f  %8.4f  %8.4f  %8.4f  %8.4f  %8.4f  %8.4f  %8.4f  %8.4f  %8.4f %8.4f\n",sTube.r_R\
-             ,sTube.a,sTube.a_p,sTube.F_n,sTube.F_t,CT,CP,sTube.gamma, sTube.AoA, sTube.Cl, sTube.Cd);
+    //CT_r=dr*sTube.F_n*rotor.NB/(0.5*pow(rotor.Vinf,2)*PI*pow(rotor.R,2));
+    CT_r=dr*sTube.F_n*rotor.NB/(pow((rotor.RPM/60),2)*pow(2*rotor.R,4));
+    CQ_r=dr*sTube.F_t*r_R*rotor.R*rotor.NB/(pow((rotor.RPM/60),2)*pow(2*rotor.R,5));
+    CP_r=2*PI*CQ_r;
+
+    rotor.CT+=CT_r; rotor.CQ+=CQ_r,rotor.CP+=CP_r;
+    rotor.Thrust+=dr*sTube.F_n*rotor.NB;
+    rotor.Torque+=dr*sTube.F_t*r_R*rotor.R*rotor.NB;
+    rotor.Power=rotor.Torque*2*PI;
+    fprintf(fm,"%8.4f  %8.4f  %8.4f  %8.4f  %8.4f  %8.4f  %8.4f  %8.4f  %8.4f  %8.4f %8.4f  %8.4f\n",sTube.r_R\
+             ,sTube.a,sTube.a_p,sTube.F_n,sTube.F_t,CT_r,CQ_r,CP_r, sTube.phi,sTube.AoA, sTube.Cl, sTube.Cd);
 
   }
   fclose(fm);
   if(DEBUG==0){
     printf("Omega = %lf\n",rotor.omega);
   }
-  printf("CT = %lf\t CP = %lf\n",rotor.CT, rotor.CP);
+    printf("\n\n--------------------------------------------------\n");
+    printf("Thrust [N] = %lf,\t Torque [N.m] = %lf,\t Power [N.m/s]= %lf\n",rotor.Thrust,rotor.Torque,rotor.Power);
+    printf("CT = %lf,\t CQ = %lf,\t CP = %lf\n",rotor.CT, rotor.CQ, rotor.CP);
+    double eta_prop=(rotor.CT/rotor.CP)*rotor.J;
+    printf("Propeller efficiency = %lf\n",eta_prop);
 
-
-
+  }
+  if(DEBUG==0){
+    BEMT(rotor, atm, Polar, numPolarP,caseIN);
+  }
 
 
 
@@ -196,7 +220,7 @@ Please check your input file!\n",thisroutine);
    free_dvector(Polar.AoA,0,numPolarP);
    free_dvector(Polar.Cl,0,numPolarP);
    free_dvector(Polar.Cd,0,numPolarP);
-
+/* */
   end=clock();
   cpu_time=get_cpu_time(start,end);
 

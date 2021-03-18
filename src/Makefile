@@ -1,3 +1,4 @@
+
 CC = gcc
 CFLAGS = -g -Wall -Wno-unused-variable -std=c99
 Lib = -lm

@@ -23,7 +23,7 @@
     fprintf(stderr,"BEMT run-time error in routine:\t%s\n",\
       routine);
     fprintf(stderr,"%s\n",error_text);
-    fprintf(stderr,"Now exiting to system ...\n");
+    fprintf(stderr,"Program terminated unsuccessfully.\nNow exiting to system ...\n");
     exit(1);
   }
 
@@ -1134,9 +1134,23 @@ c      Written by YF
 /******************************************************************************/
 /******************************************************************************/
 
-
-
-
+  double root2nd(double a, double b, double c,int PorN)
+  {
+  /*
+  
+  */
+  double rp=0.0, rn=0.0, root=0.0;
+  double desc = sqrt(b * b - 4 * a * c);
+  
+  rp = (-b + desc) / (2.0 * a);
+  rn= (-b - desc) / (2.0 * a);
+  if( PorN==1){
+    root=rp;
+  }else{
+    root=rn;
+  }
+  return root;
+  }
 
 
 
@@ -1144,9 +1158,9 @@ c      Written by YF
                int N)
   /* */
   {
-  double *diffvec=NULL; diffvec=dvector(0,N);
+  double *diffvec=NULL; diffvec=dvector(0,N-1);
   int i;
-  for(i=0;i<N;i++){
+  for(i=0;i<N-1;i++){
     diffvec[i]=vec[i+1]-vec[i];
   }
   return diffvec;
@@ -1524,6 +1538,114 @@ char* cutoffstr(const char* str,\
 /*                                                                   */
 /*===================================================================*/
 
+  RotorData getBladeGeom(RotorData rotor,caseData caseIN)
+  {
+  /*                                                                 
+  Purpose:
+         reading polar data and prepare blade geometry
+  Written by: YF
+  Date of creation: 23.02.2021
+  Date of last modification: 12.03.2021
+                                                                     */
+  const char* thisroutine="getBladeGeom";
+  FILE *fbg;
+  char fnm[256];strcpy(fnm,caseIN.caseName);
+
+  strcat(fnm,"_BladeGeom.txt");
+  fbg=fopen(fnm,"w");
+
+  double tipN=rotor.R/rotor.R;
+  rotor.BGeom.r_R=NULL; rotor.BGeom.r_R=linspace(rotor.hubR,tipN,rotor.BGeom.NumStations);
+
+  rotor.BGeom.c_R=dvector(0,rotor.BGeom.NumStations);
+  rotor.BGeom.twist=dvector(0,rotor.BGeom.NumStations);
+  
+  if(DEBUG==0){
+    for(int i=0;i<rotor.BGeom.NumStations;i++){
+      printf("Numstations =  %d, r_R = %lf\n",i,rotor.BGeom.r_R[i]);
+    }
+  }
+  fprintf(fbg,"%8s %8s %8s \n","r/R", "c/R", "twist [deg]");
+  for(int i=0;i<rotor.BGeom.NumStations;i++){
+    /* wind turbine */
+    if(caseIN.runID==0){
+      rotor.BGeom.c_R[i]=3*(1-rotor.BGeom.r_R[i])+1; /* [meters] */
+      rotor.BGeom.twist[i]=14*(1-rotor.BGeom.r_R[i])-rotor.pitchAngle; /* [degrees] */
+    /* Propeller */
+    }else if(caseIN.runID==1){
+      rotor.BGeom.c_R[i]=(0.18-0.06*rotor.BGeom.r_R[i]); /* [meters] */
+      rotor.BGeom.twist[i]=(-50*rotor.BGeom.r_R[i]+35.0)+rotor.pitchAngle; /* [degrees] */
+      }
+    else{
+      BEMT_error("Please specify the run id: 0 -> Windturbine; 1-> Propeller]\n",thisroutine);
+    }
+      fprintf(fbg,"%8.4f %8.4f %8.4f\n",rotor.BGeom.r_R[i],rotor.BGeom.c_R[i],rotor.BGeom.twist[i]);
+  }
+  fclose(fbg);
+  return rotor;
+  }
+
+  double K_chi(double chi)
+  {
+  /* 
+  */
+  double _kchi=2*tan(chi/2);
+  return _kchi;
+  }
+
+  double inducedVelocity(RotorData rotor, double r_R, double Psi, double a)
+  {
+  /*
+  This routine should be called inside  radial and azimuthal loop
+  */
+  double _Psi=Psi*PI/180.0;
+  double chi=(0.6*a+1)*rotor.yawAngle*PI/180;
+  double K_chi=2*tan(chi/2);
+  double uio=a*rotor.Vinf;
+  double u=uio*(1+K_chi*r_R*sin(_Psi));
+  return u;
+  }
+
+  double VrelInYaw(RotorData rotor, double inducedVelocity)
+  {
+  /* 
+  */
+  double yawAngleInRad=rotor.yawAngle*PI/180;
+  double Vrel=sqrt(pow((rotor.Vinf*cos(yawAngleInRad)-inducedVelocity),2) \
+             +pow((rotor.Vinf*sin(yawAngleInRad)),2));
+  return Vrel;
+  }
+
+  double flowExpansionFOyer(double r_R)
+  {
+  /*
+  Ref: Wind Energy Handbook, 2nd edition, page: 152, eq(4.36)
+  
+  */
+  double _FOyer=1/2*(r_R+1/4*pow(r_R,3)+0.4*pow(r_R,5));
+  return _FOyer;
+  }
+
+  double inflowAngleInYaw(RotorData rotor, double r_R, double a, double aprime, double Psi)
+  {
+  /*
+  Ref: Wind Energy Handbook, 2nd edition, page: 154, eq(4.44)
+  
+  */
+  double PsiInRad=Psi*PI/180.0;
+  double yawAngleInRad=rotor.yawAngle*PI/180;
+  double chiInRad=(0.6*a+1)*rotor.yawAngle*PI/180;
+  double F_miu=flowExpansionFOyer(r_R);
+  double Kchi=K_chi(chiInRad);
+  double num=rotor.Vinf*(cos(yawAngleInRad)-a*(1+F_miu*Kchi*sin(PsiInRad))) \
+            +rotor.omega*r_R*rotor.R*aprime*cos(PsiInRad)*sin(chiInRad)*(1+sin(PsiInRad)*sin(chiInRad));
+  double denum=rotor.omega*r_R*rotor.R*(1+aprime*cos(chiInRad))*(1+sin(PsiInRad)*sin(chiInRad)) \
+              +rotor.Vinf*cos(PsiInRad)*(a*tan(chiInRad/2)*(1+F_miu*Kchi*sin(PsiInRad))-sin(yawAngleInRad));
+  double tan_phi=num/denum;
+  double phi=atan(tan_phi)*180.0/PI;
+  return phi;
+  }
+
   double ainduction(double CT)
   {
   /*
@@ -1542,11 +1664,168 @@ char* cutoffstr(const char* str,\
   return a;
  }
 
-  PrndlCorr PrandtlTipRootCorrection(RotorData rotor, 
-                                     double r_R, 
-                                     double rootradius_R, 
-                                     double tipradius_R, 
-                                     double axial_induction)
+
+  bladeForce loadBladeElement(double v_n,\
+                              double v_t,\
+                              double chord,\
+                              double twist,\
+                              int numPolar,\
+                              polarData polar,\
+                              int runID)
+  {
+  /* computes the load in a blade element
+  */
+  const char* thisroutine="loadBladeElement";
+  enum WTorProp WTP=runID;
+  int code=0;
+
+  if(DEBUG==0){
+    printf("\n\n Debug info from routine %s\n\n",thisroutine);
+    printf(" runID = %d\n",runID);
+  }
+  bladeForce bladeF;
+  /*reading and getting the polar data */
+  double vrel2 = v_n*v_n + v_t*v_t;
+  double inflowangle = atan2(v_n,v_t);
+  double alpha=0.0, lift=0.0, drag=0.0;
+  double Cl=0.0, Cd=0.0;
+  switch(WTP){
+    case(Windturbine):
+      alpha =inflowangle*180.0/PI-twist;
+      Cl=0.0, Cd=0.0;
+      /* interpolate Cl and Cd at alpha */
+      cspline(polar.AoA, polar.Cl, numPolar, (polar.Cl[1]-polar.Cl[0]) \
+              ,(polar.Cl[numPolar-1]-polar.Cl[numPolar-2]), alpha, &Cl);
+      cspline(polar.AoA, polar.Cd, numPolar, (polar.Cd[1]-polar.Cd[0]) \
+              ,(polar.Cd[numPolar-1]-polar.Cd[numPolar-2]), alpha, &Cd);
+
+      lift = 0.5*vrel2*Cl*chord;
+      drag = 0.5*vrel2*Cd*chord;
+      bladeF.F_n=lift*cos(inflowangle)+drag*sin(inflowangle);
+      bladeF.F_t=lift*sin(inflowangle)-drag*cos(inflowangle);
+      bladeF.gamma=0.5*sqrt(vrel2)*Cl*chord;
+      bladeF.phi=inflowangle*180.0/PI;/* in deg */
+      bladeF.AoA=alpha; /* in deg */
+      bladeF.Cl=Cl;
+      bladeF.Cd=Cd;
+      break;
+    case(Propeller):
+      alpha=twist-inflowangle*180.0/PI;
+      //printf("vn =%lf, vt = %lf, vrel2 = %lf\n",v_n,v_t,vrel2);
+      //printf("twist = %lf, phi = %lf, alpha = %lf\n",inflowangle*180.0/PI, twist,alpha);
+      cspline(polar.AoA, polar.Cl, numPolar, (polar.Cl[1]-polar.Cl[0]) \
+              ,(polar.Cl[numPolar-1]-polar.Cl[numPolar-2]), alpha, &Cl);
+      cspline(polar.AoA, polar.Cd, numPolar, (polar.Cd[1]-polar.Cd[0]) \
+              ,(polar.Cd[numPolar-1]-polar.Cd[numPolar-2]), alpha, &Cd);
+
+      lift = 0.5*vrel2*Cl*chord;
+      drag = 0.5*vrel2*Cd*chord;
+      bladeF.F_n=lift*cos(inflowangle)-drag*sin(inflowangle);
+      bladeF.F_t=lift*sin(inflowangle)+drag*cos(inflowangle);
+      bladeF.gamma=0.5*sqrt(vrel2)*Cl*chord;
+      bladeF.phi=inflowangle*180.0/PI;/* in deg */
+      bladeF.AoA=alpha; /* in deg */
+      bladeF.Cl=Cl;
+      bladeF.Cd=Cd;
+      break;
+    default:
+      BEMT_error("Please set runID [0->WT; 1-> Prop]\n",thisroutine);
+  }
+
+
+  if(DEBUG==0){
+  printf(" alpha = %lf interpCL = %lf\n",alpha,Cl);
+  //printf(" alpha = %lf interCD = %lf\n",alpha,Cd);
+    printf(" chord = %lf, gamma = %lf\n",chord,bladeF.gamma);
+  }
+  
+  return bladeF;
+  }
+
+  bladeForce loadBladeElementInYaw(double inflowAnlgeInYawInDeg,
+                                   double Vrel,\
+                                   double Psi,\
+                                   double chord,\
+                                   double twist,\
+                                   int numPolar,\
+                                   polarData polar,\
+                                   int runID)
+  {
+  /* computes the load in a blade element
+  */
+  const char* thisroutine="loadBladeElement";
+  enum WTorProp WTP=runID;
+  int code=0;
+
+  if(DEBUG==0){
+    printf("\n\n Debug info from routine %s\n\n",thisroutine);
+    printf(" runID = %d\n",runID);
+  }
+  bladeForce bladeF;
+  /*reading and getting the polar data */
+  double vrel2=Vrel*Vrel;
+  double alpha=0.0;
+  switch(WTP){
+    case(Windturbine):
+      alpha =inflowAnlgeInYawInDeg-twist;
+      break;
+    case(Propeller):
+      alpha=twist-inflowAnlgeInYawInDeg;
+      break;
+    default:
+      BEMT_error("Please set runID [0->WT; 1-> Prop]\n",thisroutine);
+  }
+  double Cl=0.0, Cd=0.0;
+  /* interpolate Cl and Cd at alpha */
+  cspline(polar.AoA, polar.Cl, numPolar, (polar.Cl[1]-polar.Cl[0]) \
+          ,(polar.Cl[numPolar-1]-polar.Cl[numPolar-2]), alpha, &Cl);
+  cspline(polar.AoA, polar.Cd, numPolar, (polar.Cd[1]-polar.Cd[0]) \
+          ,(polar.Cd[numPolar-1]-polar.Cd[numPolar-2]), alpha, &Cd);
+
+  double lift = 0.5*vrel2*Cl*chord;
+  double drag = 0.5*vrel2*Cd*chord;
+  double inflowangle=inflowAnlgeInYawInDeg*PI/180;
+  bladeF.F_n=lift*cos(inflowangle)+drag*sin(inflowangle);
+  bladeF.F_t=lift*sin(inflowangle)-drag*cos(inflowangle);
+  bladeF.gamma=0.5*sqrt(vrel2)*Cl*chord;
+  bladeF.phi=inflowAnlgeInYawInDeg;
+  bladeF.AoA=alpha; /* in deg */
+  bladeF.Cl=Cl;
+  bladeF.Cd=Cd;
+
+  if(DEBUG==0){
+  }
+  
+  return bladeF;
+  }
+
+
+
+  PrndlCorr PrandtlTipRootCorrectionYF(RotorData rotor,
+                                     double r_R,
+                                     double phi)
+  {
+  /*
+  */
+  const char* thisroutine="PrandtlTipRootCorrectionYF";
+  enum WTorProp WTP=rotor.caseIN.runID;
+  double TINY=1.0e-25;
+  PrndlCorr Pcorr; 
+  double temp1=-(rotor.NB/2)*(1-r_R)/(2*r_R*sin(phi));
+  Pcorr.PrandtlTip=2/PI*acos(exp(temp1));
+  double temp2 = -(rotor.NB/2)*(r_R)/((1-r_R)*sin(phi));
+  Pcorr.PrandtlRoot=2/PI*acos(exp(temp2));
+  Pcorr.PrandtlRxT=Pcorr.PrandtlTip*Pcorr.PrandtlRoot;
+
+  return Pcorr;
+  }
+
+  PrndlCorr PrandtlTipRootCorrection(RotorData rotor,
+                                     double r_R,
+                                     double rootradius_R,
+                                     double tipradius_R,
+                                     double axial_induction,
+                                     double phi)
   {
   /*
   This function calcualte steh combined tip and root Prandtl correction
@@ -1561,7 +1840,9 @@ char* cutoffstr(const char* str,\
   
   */
   const char* thisroutine="PrandtlTipRootCorrection";
+  enum WTorProp WTP=rotor.caseIN.runID;
   double TINY=1.0e-25;
+  double phiINrad=0.0;
   if(DEBUG==0){
     printf("\n\n Debug info from routine %s\n\n",thisroutine);
     printf("TSR = %lf\n",rotor.TSR);
@@ -1572,10 +1853,24 @@ char* cutoffstr(const char* str,\
   }
   
   PrndlCorr Pcorr; double Froot=0.0, Ftip=0.0, temp1=0.0, temp2=0.0;
-  temp1=-rotor.NB/2*(tipradius_R-r_R)/r_R*sqrt(1+pow((rotor.TSR*r_R),2)/(pow((1-axial_induction),2)));
-  Ftip=2/PI*acos(exp(temp1));
-  temp2=rotor.NB/2*(rootradius_R-r_R)/r_R*sqrt(1+pow((rotor.TSR*r_R),2)/(pow((1-axial_induction),2)));
-  Froot=2/PI*acos(exp(temp2));
+  switch(WTP){
+    case(Windturbine):
+      temp1=-rotor.NB/2*(tipradius_R-r_R)/r_R*sqrt(1+pow((rotor.TSR*r_R),2)/(pow((1-axial_induction),2)));
+      Ftip=2/PI*acos(exp(temp1));
+      temp2=rotor.NB/2*(rootradius_R-r_R)/r_R*sqrt(1+pow((rotor.TSR*r_R),2)/(pow((1-axial_induction),2)));
+      Froot=2/PI*acos(exp(temp2));
+      break;
+    case(Propeller):
+      phiINrad=phi*PI/180;
+      if(DEBUG==0)printf("check if phi is in rad: %lf [deg] %lf[rad]\n",phi,phiINrad);
+      double temp1=-(rotor.NB/2)*(1-r_R)/(2*r_R*sin(phi));
+      Ftip=2/PI*acos(exp(temp1));
+      double temp2=-(rotor.NB/2)*(r_R)/((1-r_R)*phi);
+      Froot=2/PI*acos(exp(temp2));
+      break;
+    default:
+      BEMT_error("Please specify run ID:0->WT; 1-> Propeller]\n",thisroutine);
+  }
 
   Pcorr.PrandtlRoot=Froot;
   Pcorr.PrandtlTip=Ftip;
@@ -1611,49 +1906,6 @@ char* cutoffstr(const char* str,\
   return SWCorr;
   }
 
-  bladeForce loadBladeElement(double v_n,\
-                              double v_t,\
-                              double chord,\
-                              double twist,\
-                              int numPolar,\
-                              polarData polar)
-  {
-  /* computes the load in a blade element
-  */
-  int code=0;
-  const char* thisroutine="loadBladeElement";
-  if(DEBUG==0){
-    printf("\n\n Debug info from routine %s\n\n",thisroutine);
-
-  }
-  bladeForce bladeF;
-  /*reading and getting the polar data */
-  double vmag2 = v_n*v_n + v_t*v_t;
-  double inflowangle = atan2(v_n,v_t);
-  double alpha =inflowangle*180.0/PI-twist;
-  double Cl=0.0, Cd=0.0;
-  /* interpolate Cl and Cd at alpha */
-  cspline(polar.AoA, polar.Cl, numPolar, (polar.Cl[1]-polar.Cl[0]) \
-          ,(polar.Cl[numPolar-1]-polar.Cl[numPolar-2]), alpha, &Cl);
-  cspline(polar.AoA, polar.Cd, numPolar, (polar.Cd[1]-polar.Cd[0]) \
-          ,(polar.Cd[numPolar-1]-polar.Cd[numPolar-2]), alpha, &Cd);
-
-  if(DEBUG==0){
-  printf(" alpha = %lf interpCL = %lf\n",alpha,Cl);
-  printf(" alpha = %lf interCD = %lf\n",alpha,Cd);
-  }
-  double lift = 0.5*vmag2*Cl*chord;
-  double drag = 0.5*vmag2*Cd*chord;
-  bladeF.F_n=lift*cos(inflowangle)+drag*sin(inflowangle);
-  bladeF.F_t=lift*sin(inflowangle)-drag*cos(inflowangle);
-  bladeF.gamma=0.5*sqrt(vmag2)*Cl*chord;
-  bladeF.AoA=alpha;
-  bladeF.Cl=Cl;
-  bladeF.Cd=Cd;
-  
-  return bladeF;
-  }
-
   streamTube solveStreamTube(RotorData rotor,\
                              double r1_R,\
                              double r2_R,\
@@ -1664,67 +1916,123 @@ char* cutoffstr(const char* str,\
                              double twist,\
                              int numPolar,\
                              polarData polar)
-{
-/*
+  {
+  /*
 
-*/
+  */
+  const char* thisroutine="solveStreamTube";
+  enum WTorProp WTP=rotor.caseIN.runID;
   streamTube sTube;
   PrndlCorr Pcorr;
   SkewedWakeCorr YawCorr;
   bladeForce BForce;
-  double anew=0.0;
+  double anew=0.35;
+  double alinenew=0.20;
 
   double AnularRingArea = PI*(pow(r2_R*rotor.R,2)-pow(r1_R*rotor.R,2)); /* area streamtube */
   double r_R = (r1_R+r2_R)/2; /* centroide */
   /* initiatlize variables */
-  double a = 0.30; /* axial induction */
+  double a = 0.3; /* axial induction */
   double aline = 0.0; /* tangential induction factor */
   
     
   int Niter = 1000;
   /* */
-  double Erroriterations =0.9e-10; /* error limit for iteration rpocess, in absolute value of induction */
+  double epsilon =0.9e-5; /* error limit for iteration rpocess, in absolute value of induction */
   double Vrotor=0.0, Vtan=0.0, load3Daxial=0.0, CT=0.0, TSR=0.0;
   for(int i=0;i<Niter;i++){
-     /* calculate the velocity and loads at blade element */
-    Vrotor = rotor.Vinf*(1-a); /* axial velocity at rotor */
-    //Vrotor=rotor.Vinf*(cos(rotor.yawAngle*PI/180)-a);
-    //printf(" vrotor = %lf\n",Vrotor);
-    Vtan = (1+aline)*omega*r_R*rotor.R; /* tangential velocity at rotor */
-    //Vtan=(cos(rotor.yawAngle*PI/180)+aline)*omega*r_R*rotor.R;
-    //printf(" Vtan = %lf\n",Vtan);
-    /* calculate loads in blade segment in 2D (N/m) */
-    BForce=loadBladeElement(Vrotor,Vtan,chord,twist,numPolar,polar);
-    //printf("Fn = %lf Ft = %lf gamma = %lf\n",BForce.F_n, BForce.F_t,BForce.gamma);
-    load3Daxial =BForce.F_n*rotor.R*(r2_R-r1_R)*rotor.NB; /* 3D force in axial direction */
-    /*Calculate new estimate of axial and azimuthal induction */
-    /* calculate thrust coefficient at the streamtube */
-    //printf(" load3D = %lf\n",load3Daxial);
-    CT = load3Daxial/(0.5*AnularRingArea*rotor.Vinf*rotor.Vinf);
-    //printf("CT = %lf\n",CT);
-    anew=ainduction(CT);
-    /* correct new axial induction with Prandtl's correction */
-    Pcorr=PrandtlTipRootCorrection(rotor,\
-                                   r_R,\
-                                   rootR,\
-                                   tipR,\
-                                   anew);
-    if(Pcorr.PrandtlRxT<0.0001) Pcorr.PrandtlRxT=0.0001;/* avoid devide by zero */
-    anew=anew/Pcorr.PrandtlRxT;/*correct estimate of axial induction */
-    /* apply yaw correction */
-    YawCorr=WakeCorr(rotor, 
-                     Vrotor,\
-                     Vtan,\
-                     rotor.yawAngle,\
-                     r_R,\
-                     anew);
-    anew=YawCorr.a;
-    a=0.75*a+0.25*anew; /* for improving convergence, weigh current and previous iteration of axial induction */
-    /* calculate azimuthal/tangential induction*/
-    aline = BForce.F_t*rotor.NB/(2*PI*rotor.Vinf*(1-a)*omega*2*pow((r_R*rotor.R),2));
-    aline =aline/Pcorr.PrandtlRxT; /* correct estimate of azimuthal induction with Prandtl's correction */
+  //while(fabs(a-anew) < epsilon || fabs(aline-alinenew) < epsilon){
+    switch(WTP){
+      case(Windturbine):
+        /* calculate the velocity and loads at blade element */
+        Vrotor = rotor.Vinf*(1-a); /* axial velocity at rotor */
+        Vtan = (1+aline)*omega*r_R*rotor.R; /* tangential velocity at rotor */
+        /* calculate loads in blade segment in 2D (N/m) */
+        BForce=loadBladeElement(Vrotor,\
+                                Vtan,\
+                                chord,\
+                                twist,\
+                                numPolar,\
+                                polar,\
+                                rotor.caseIN.runID);
+        load3Daxial =BForce.F_n*rotor.R*(r2_R-r1_R)*rotor.NB; /* 3D force in axial direction */
+        /*Calculate new estimate of axial and azimuthal induction */
+        /* calculate thrust coefficient at the streamtube */
+        CT = load3Daxial/(0.5*AnularRingArea*rotor.Vinf*rotor.Vinf);
+        anew=ainduction(CT);
+        /* correct new axial induction with Prandtl's correction */
+        Pcorr=PrandtlTipRootCorrection(rotor,\
+                                       r_R,\
+                                       rootR,\
+                                       tipR,\
+                                       anew,\
+                                       BForce.phi);
+        if(Pcorr.PrandtlRxT<0.0001) Pcorr.PrandtlRxT=0.0001;/* avoid devide by zero */
+        anew=anew/Pcorr.PrandtlRxT;/*correct estimate of axial induction */
+        /* apply yaw correction */
+
+        break;
+      case(Propeller):
+        Vrotor=rotor.Vinf*(1+a);
+        Vtan=(1-aline)*omega*r_R*rotor.R;
+        if(DEBUG==1)printf("r/R = %lf, r = %lf\n",r_R,r_R*rotor.R);
+        /* calculate loads in blade segment in 2D (N/m) */
+        BForce=loadBladeElement(Vrotor,\
+                                Vtan,\
+                                chord,\
+                                twist,\
+                                numPolar,\
+                                polar,\
+                                rotor.caseIN.runID);
+        load3Daxial =BForce.F_n*rotor.R*(r2_R-r1_R)*rotor.NB; /* 3D force in axial direction */
+        /*Calculate new estimate of axial and azimuthal induction */
+        /* calculate thrust coefficient at the streamtube */
+        CT = load3Daxial/(0.5*AnularRingArea*rotor.Vinf*rotor.Vinf);
+        anew=ainduction(CT);
+        /* correct new axial induction with Prandtl's correction */
+        Pcorr=PrandtlTipRootCorrection(rotor,\
+                                       r_R,\
+                                       rootR,\
+                                       tipR,\
+                                       anew,\
+                                       BForce.phi);
+        if(Pcorr.PrandtlRxT<0.0001) Pcorr.PrandtlRxT=0.0001;/* avoid devide by zero */
+        anew=anew/Pcorr.PrandtlRxT;/*correct estimate of axial induction */
+        /* apply yaw correction */
+        break;
+      default:
+      BEMT_error("Please specify the runID: 0-> WT; 1-> Prop\n",thisroutine);
+    }
+
+    switch(WTP){
+      case(Windturbine):
+        YawCorr=WakeCorr(rotor, 
+                         Vrotor,\
+                         Vtan,\
+                         rotor.yawAngle,\
+                         r_R,\
+                         anew);
+        anew=YawCorr.a;
+        a=0.75*a+0.25*anew; /* for improving convergence, weigh current and previous iteration of axial induction */
+        aline=0.75*aline+0.25*alinenew;
+        /* calculate azimuthal/tangential induction*/
+        aline = BForce.F_t*rotor.NB/(2*PI*rotor.Vinf*(1-a)*omega*2*pow((r_R*rotor.R),2));
+        aline =aline/Pcorr.PrandtlRxT; /* correct estimate of azimuthal induction with Prandtl's correction */
+        break;
+      case(Propeller):
+        //anew=anew;
+        a=0.75*a+0.25*anew; /* for improving convergence, weigh current and previous iteration of axial induction */
+        aline=0.75*aline+0.25*alinenew;
+        /* calculate azimuthal/tangential induction*/
+        aline = BForce.F_t*rotor.NB/(2*PI*rotor.Vinf*(1+a)*omega*2*pow((r_R*rotor.R),2));
+        aline =aline/Pcorr.PrandtlRxT; /* correct estimate of azimuthal induction with Prandtl's correction */
+        break;
+      default:
+        BEMT_error("Please specify the run ID: 0->WT; 1->Prop\n",thisroutine);
+    }
+
     /* test convergence of solution, by checking convergence of axial induction*/
-    if (fabs(a-anew) < Erroriterations){
+    if (fabs(a-anew) < epsilon && fabs(aline-alinenew) < epsilon){
     if(DEBUG==0){
       printf("iterations %d    a-anew = %lf\n",i,fabs(a-anew));
       printf(" a\t %lf ap\t %lf r_R\t %lf F_n\t %lf F_t\t %lf gamma\t %lf\n",a\
@@ -1738,6 +2046,7 @@ char* cutoffstr(const char* str,\
     sTube.F_n=BForce.F_n;
     sTube.F_t=BForce.F_t;
     sTube.gamma=BForce.gamma;
+    sTube.phi=BForce.phi;
     sTube.AoA=BForce.AoA;
     sTube.Cl=BForce.Cl;
     sTube.Cd=BForce.Cd;
@@ -1746,36 +2055,338 @@ char* cutoffstr(const char* str,\
   return sTube;
 }
 
+  streamTube solveStreamTubeInWake(RotorData rotor,\
+                                   double r1_R,\
+                                   double r2_R,\
+                                   double rootR,\
+                                   double tipR,\
+                                   double omega,\
+                                   double chord,\
+                                   double twist,\
+                                   int numPolar,\
+                                   polarData polar)
+{
+/*
 
-  RotorData getBladeGeom(RotorData rotor,caseData caseIN)
+*/
+  const char* thisroutine="solveStreamTube";
+  enum WTorProp WTP=rotor.caseIN.runID;
+  streamTube sTube;
+  PrndlCorr Pcorr;
+  SkewedWakeCorr YawCorr;
+  bladeForce BForce;
+  double anew=0.35;
+  double alinenew=0.20;
+
+  double AnularRingArea = PI*(pow(r2_R*rotor.R,2)-pow(r1_R*rotor.R,2)); /* area streamtube */
+  double r_R = (r1_R+r2_R)/2; /* centroide */
+  /* initiatlize variables */
+  double a = 0.35; /* axial induction */
+  double aline = 0.0; /* tangential induction factor */
+  
+    
+  int Niter = 1000;
+  /* */
+  double epsilon =0.9e-5; /* error limit for iteration rpocess, in absolute value of induction */
+  double Vrotor=0.0, Vtan=0.0, load3Daxial=0.0, CT=0.0, TSR=0.0;
+  for(int i=0;i<Niter;i++){
+  //while(fabs(a-anew) < epsilon || fabs(aline-alinenew) < epsilon){
+
+    /* apply yaw correction */
+    switch(WTP){
+      case(Windturbine):
+        /* calculate the velocity and loads at blade element */
+        Vrotor = rotor.Vinf*(1-a); /* axial velocity at rotor */
+        Vtan = (1+aline)*omega*r_R*rotor.R; /* tangential velocity at rotor */
+        /* calculate loads in blade segment in 2D (N/m) */
+        BForce=loadBladeElement(Vrotor,\
+                                Vtan,\
+                                chord,\
+                                twist,\
+                                numPolar,\
+                                polar,\
+                                rotor.caseIN.runID);
+        load3Daxial =BForce.F_n*rotor.R*(r2_R-r1_R)*rotor.NB; /* 3D force in axial direction */
+        /*Calculate new estimate of axial and azimuthal induction */
+        /* calculate thrust coefficient at the streamtube */
+        CT = load3Daxial/(0.5*AnularRingArea*rotor.Vinf*rotor.Vinf);
+        anew=ainduction(CT);
+        /* correct new axial induction with Prandtl's correction */
+        Pcorr=PrandtlTipRootCorrection(rotor,\
+                                       r_R,\
+                                       rootR,\
+                                       tipR,\
+                                       anew,\
+                                       BForce.phi);
+        if(Pcorr.PrandtlRxT<0.0001) Pcorr.PrandtlRxT=0.0001;/* avoid devide by zero */
+        anew=anew/Pcorr.PrandtlRxT;/*correct estimate of axial induction */
+        YawCorr=WakeCorr(rotor, 
+                         Vrotor,\
+                         Vtan,\
+                         rotor.yawAngle,\
+                         r_R,\
+                         anew);
+        anew=YawCorr.a;
+        a=0.75*a+0.25*anew; /* for improving convergence, weigh current and previous iteration of axial induction */
+        aline=0.75*aline+0.25*alinenew;
+        /* calculate azimuthal/tangential induction*/
+        aline = BForce.F_t*rotor.NB/(2*PI*rotor.Vinf*(1-a)*omega*2*pow((r_R*rotor.R),2));
+        aline =aline/Pcorr.PrandtlRxT; /* correct estimate of azimuthal induction with Prandtl's correction */
+        break;
+      case(Propeller):
+        Vrotor=rotor.Vinf*(1+a);
+        Vtan=(1-aline)*omega*r_R*rotor.R;
+        if(DEBUG==0)printf("r/R = %lf, r = %lf\n",r_R,r_R*rotor.R);
+
+        BForce=loadBladeElement(Vrotor,\
+                                Vtan,\
+                                chord,\
+                                twist,\
+                                numPolar,\
+                                polar,\
+                                rotor.caseIN.runID);
+        load3Daxial=rotor.NB*BForce.F_n*rotor.R*(r2_R-r1_R); /* 3D force in axial direction */
+
+        Pcorr=PrandtlTipRootCorrectionYF(rotor,\
+                                         r_R,\
+                                         BForce.phi*PI/180);
+        if(Pcorr.PrandtlRxT<0.0001) Pcorr.PrandtlRxT=0.0001;/* avoid devide by zero */
+        //anew=anew/Pcorr.PrandtlRxT;/*correct estimate of axial induction */
+
+        CT=Pcorr.PrandtlRxT*load3Daxial/(0.5*AnularRingArea*pow(rotor.Vinf,2));
+        //CT= Pcorr.PrandtlRxT*load3Daxial/(PI*rotor.R*pow(rotor.Vinf,2));
+        anew=root2nd(4.0,4.0,-CT,1);
+
+
+        aline=(anew*(1+anew))/(pow((rotor.omega*r_R*rotor.R/rotor.Vinf),2));
+        a=0.75*a+0.25*anew; /* for improving convergence, weigh current and previous iteration of axial induction */
+        aline=0.75*aline+0.25*alinenew;
+
+        break;
+      default:
+        BEMT_error("Please specify the run ID: 0->WT; 1->Prop\n",thisroutine);
+    }
+
+    /* test convergence of solution, by checking convergence of axial induction*/
+    if (fabs(a-anew) < epsilon && fabs(aline-alinenew) < epsilon){
+    if(DEBUG==0){
+      printf("iterations %d    a-anew = %lf\n",i,fabs(a-anew));
+      printf(" a\t %lf ap\t %lf r_R\t %lf F_n\t %lf F_t\t %lf gamma\t %lf\n",a\
+             ,aline,r_R,BForce.F_n,BForce.F_t,BForce.gamma);
+      }
+       break;
+    }
+    sTube.a=a;if(a==0.0/0.0) sTube.a=0.0;
+    sTube.a_p=aline;if(aline==0.0/0.0) sTube.a_p=0.0;
+    sTube.r_R=r_R;
+    sTube.F_n=BForce.F_n;
+    sTube.F_t=BForce.F_t;
+    sTube.gamma=BForce.gamma;
+    sTube.phi=BForce.phi;
+    sTube.AoA=BForce.AoA;
+    sTube.Cl=BForce.Cl;
+    sTube.Cd=BForce.Cd;
+  }
+
+  return sTube;
+}
+
+/*===================================================*/
+
+  void BEMT(RotorData rotor, ATMData atm, polarData polar, int numPolar,caseData caseIN)
   {
   /*
   */
-  FILE *fbg;
+  const char* thisroutine="BEMT";
+  enum WTorProp WTP=caseIN.runID;
+  FILE *fm;
   char fnm[256];strcpy(fnm,caseIN.caseName);
 
-  strcat(fnm,"_BladeGeom.txt");
-  fbg=fopen(fnm,"w");
-
-  double tipN=rotor.R/rotor.R;
-  rotor.BGeom.r_R=NULL; rotor.BGeom.r_R=linspace(rotor.hubR,tipN,rotor.BGeom.NumStations);
-
-  rotor.BGeom.c_R=dvector(0,rotor.BGeom.NumStations);
-  rotor.BGeom.twist=dvector(0,rotor.BGeom.NumStations);
+  strcat(fnm,"_Restuls.txt");
+  fm=fopen(fnm,"w");
   
-  if(DEBUG==0){
-    for(int i=0;i<rotor.BGeom.NumStations;i++){
-      printf("Numstations =  %d, r_R = %lf\n",i,rotor.BGeom.r_R[i]);
-    }
-  }
-  fprintf(fbg,"%8s %8s %8s \n","r/R", "c/R", "twist [deg]");
+  fprintf(fm,"%8s %8s %8s %8s %8s %8s %8s %8s %8s %8s %8s %8s\n","r/R"\
+    ,"a","a'","Fn [N]","Ft[N]","CT","CQ","CP","Phi","AoA","Cl","Cd");
+
+  double epsilon=0.9e-10;
+  PrndlCorr Pcorr;
+
+  double *r=NULL; r=linspace(rotor.hubR*rotor.R,rotor.R,rotor.BGeom.NumStations);
+  double *r_R=NULL; r_R=dvector(0,rotor.BGeom.NumStations);
+  double *delta_r=NULL; delta_r=dvector(0,rotor.BGeom.NumStations);
+
   for(int i=0;i<rotor.BGeom.NumStations;i++){
-    rotor.BGeom.c_R[i]=3*(1-rotor.BGeom.r_R[i])+1; /* [meters] */
-    rotor.BGeom.twist[i]=14*(1-rotor.BGeom.r_R[i])+rotor.pitchAngle; /* [degrees] */
-    fprintf(fbg,"%8.4f %8.4f %8.4f\n",rotor.BGeom.r_R[i],rotor.BGeom.c_R[i],rotor.BGeom.twist[i]);
+  //for(int i=0;i<1;i++){
+    delta_r[i]=r[i+1]-r[i];
+    if(i==0) delta_r[i]=rotor.hubR;
+    if(i==rotor.BGeom.NumStations-1) delta_r[i]=rotor.hubR;
+    r_R[i]=r[i]/rotor.R;
   }
-  fclose(fbg);
-  return rotor;
+  if(DEBUG==0){
+     //printf(" delta_r[0]=%lf\n,delta_r[1] = %lf\n,delta_r[n-2]=%lf\n,delta_r[n-1] = %lf\n",\
+     //       delta_r[0],delta_r[1],delta_r[rotor.BGeom.NumStations-2],delta_r[rotor.BGeom.NumStations-1]);
+     printf("r_R[0]=%lf\n,r_R[1] = %lf\n,rR[n-2]=%lf\n,rR[n-1] = %lf\n",\
+            r_R[0],r_R[1],r_R[rotor.BGeom.NumStations-2],r_R[rotor.BGeom.NumStations-1]);
+     printf(" r_R = %lf c_R =%lf balde angle  = %lf\n",rotor.BGeom.r_R[0],rotor.BGeom.c_R[0],rotor.BGeom.twist[0]);
+  }
+  
+  // Initial values of induction factors
+  double a=0.3, anew=0;                                // Initial axial induction factor
+  double a_prime=0, a_prime_new=0.0;                   // Initial tangential induction factor
+  double a_old = 0.35;                                 // Initial old axial induction value
+  double a_prime_old = 0.2;                            // Initial old tangential induction factor
+  double Vn=0.0, Vt=0.0, Vrel2=0.0, Phi=0.0, PhiDeg=0.0, alpha=0.0, bladeAngle=0.0, chord=0.0, Cl_r=0.0, Cd_r=0.0;
+  double L_r=0.0, D_r=0.0, T_r=0.0, F_tr=0.0, Q_r=0.0, P_r=0.0, Ct_r=0.0, CT_r=0.0, CQ_r=0.0, CP_r=0.0;
+  double T_sum=0.0, Q_sum=0.0;
+  
+  for(int i=0;i<rotor.BGeom.NumStations-1;i++){
+
+    cspline(rotor.BGeom.r_R, rotor.BGeom.c_R, rotor.BGeom.NumStations, (rotor.BGeom.c_R[1]-rotor.BGeom.c_R[0]) \
+      ,(rotor.BGeom.c_R[rotor.BGeom.NumStations-1]-rotor.BGeom.c_R[rotor.BGeom.NumStations-2]),r_R[i],&chord);
+    cspline(rotor.BGeom.r_R, rotor.BGeom.twist, rotor.BGeom.NumStations, (rotor.BGeom.twist[1]-rotor.BGeom.twist[0]) \
+      ,(rotor.BGeom.twist[rotor.BGeom.NumStations-1]-rotor.BGeom.twist[rotor.BGeom.NumStations-2]),r_R[i],&bladeAngle);
+    switch(WTP){
+      case(Windturbine):
+      Vn=rotor.Vinf*(1-a);
+      Vt=rotor.TSR*(rotor.Vinf*r_R[i]*(1+a_prime));
+      Vrel2=Vn*Vn+Vt*Vt;                 
+      Phi=atan2(Vn,Vt);                  
+      PhiDeg=Phi*180/PI;                 
+      alpha=PhiDeg-bladeAngle;           
+
+      cspline(polar.AoA, polar.Cl, numPolar, (polar.Cl[1]-polar.Cl[0]) \
+              ,(polar.Cl[numPolar-1]-polar.Cl[numPolar-2]), alpha, &Cl_r);
+      cspline(polar.AoA, polar.Cd, numPolar, (polar.Cd[1]-polar.Cd[0]) \
+              ,(polar.Cd[numPolar-1]-polar.Cd[numPolar-2]), alpha, &Cd_r);
+      if(DEBUG==0){
+        printf(" Vn = %lf, Vt = %lf\n",Vt, Vn);
+        printf("inflowangle = %lf, r_R = %lf, beta = %lf, alpha=%lf\n",PhiDeg,r_R[i],bladeAngle,alpha);
+      }
+      L_r=0.5*atm.rho*chord*Vrel2*Cl_r*delta_r[i];
+      D_r=0.5*atm.rho*chord*Vrel2*Cd_r*delta_r[i];
+      T_r=L_r*cos(Phi)+D_r*sin(Phi);
+      F_tr=L_r*sin(Phi)-D_r*cos(Phi);
+      Q_r=r[i]*F_tr;
+      P_r=Q_r*rotor.TSR*rotor.Vinf/rotor.R;
+
+      /* Update axial induction factor */
+      if(i>0){
+          Ct_r=rotor.NB*T_r/(0.5*atm.rho*pow(rotor.Vinf,2)*PI*(pow(r[i],2)-pow(r[i-1],2)));
+      }else{
+          Ct_r=rotor.NB*T_r/(0.5*atm.rho*pow(rotor.Vinf,2)*PI*(pow(r[i+1],2)-pow(r[i],2)));
+      }
+      //apply corrections
+      anew=ainduction(Ct_r);
+
+      Pcorr=PrandtlTipRootCorrectionYF(rotor,\
+                                     r_R[i],\
+                                     Phi);
+
+
+      if(Pcorr.PrandtlRxT<0.0001) Pcorr.PrandtlRxT=0.0001;// * avoid devide by zero * /
+
+      anew=anew/Pcorr.PrandtlRxT;/*correct estimate of axial induction */
+      a_prime_new=F_tr*rotor.NB/(2*atm.rho*2*PI*r[i]*pow(rotor.Vinf,2)*(1-anew)*rotor.TSR*r_R[i]);
+      a_prime_new=a_prime_new/Pcorr.PrandtlRxT;
+
+      a_old=a;
+      a_prime_old=a_prime;
+    
+      a= 0.75*a_old+0.25*anew;
+      a_prime= 0.75*a_prime_old+0.25*a_prime_new;
+
+      if (fabs(a-anew) < epsilon || fabs(a_prime-a_prime_new) < epsilon){
+         break;
+      }
+      CT_r=T_r/(0.5*atm.rho*pow(rotor.Vinf,2)*PI*pow(rotor.R,2));
+      CQ_r=Q_r/(0.5*atm.rho*pow(rotor.Vinf,3)*PI*pow(rotor.R,2));
+      CP_r=P_r/(0.5*atm.rho*PI*pow(rotor.R,2)*pow(rotor.Vinf,3));
+
+      T_sum+=T_r; Q_sum+=Q_r;
+      double Thrust=rotor.NB*T_sum;printf("Total thrust [N] = %lf\n",Thrust);
+      double Torque=rotor.NB*Q_sum;printf("Total torque [Nm] = %lf\n",Torque);
+      double P=Torque*rotor.TSR*rotor.Vinf/rotor.R;printf("Total power [Nm^2/s] = %lf\n",P);
+      double CT=Thrust/(0.5*atm.rho*pow(rotor.Vinf,2)*PI*pow(rotor.R,2));
+      printf("CT = %lf\n",CT);
+      double CQ=Torque/(0.5*atm.rho*pow(rotor.Vinf,3)*PI*pow(rotor.R,2));
+      printf("CQ = %lf\n",CQ);
+      double CP=P/(0.5*atm.rho*PI*pow(rotor.R,2)*pow(rotor.Vinf,3));
+      printf("CP = %lf\n",CP);
+      break;
+    case(Propeller):
+      Vn=rotor.Vinf*(1+a);
+      Vt=rotor.omega*r[i]*(1-a_prime);
+      Vrel2=pow(Vn,2)+pow(Vt,2);
+      Phi=atan2(Vn,Vt);
+      PhiDeg=Phi*180.0/PI;
+      alpha=bladeAngle-PhiDeg;
+
+      cspline(polar.AoA, polar.Cl, numPolar, (polar.Cl[1]-polar.Cl[0]) \
+              ,(polar.Cl[numPolar-1]-polar.Cl[numPolar-2]), alpha, &Cl_r);
+      cspline(polar.AoA, polar.Cd, numPolar, (polar.Cd[1]-polar.Cd[0]) \
+              ,(polar.Cd[numPolar-1]-polar.Cd[numPolar-2]), alpha, &Cd_r);
+      if(DEBUG==0){
+        printf(" Vn = %lf, Vt = %lf\n",Vt, Vn);
+        printf("inflowangle = %lf, r_R = %lf, beta = %lf, alpha=%lf\n",PhiDeg,r_R[i],bladeAngle,alpha);
+      }
+      Pcorr=PrandtlTipRootCorrectionYF(rotor,\
+                                     r_R[i],\
+                                     Phi);
+
+      if(Pcorr.PrandtlRxT<0.0001) Pcorr.PrandtlRxT=0.0001;// * avoid devide by zero * /
+
+      L_r=Pcorr.PrandtlRxT*0.5*atm.rho*chord*Vrel2*Cl_r*delta_r[i];
+      D_r=Pcorr.PrandtlRxT*0.5*atm.rho*chord*Vrel2*Cd_r*delta_r[i];
+      T_r=L_r*cos(Phi)-D_r*sin(Phi);
+      F_tr=L_r*sin(Phi)+D_r*cos(Phi);
+      Q_r=r[i]*F_tr;
+      P_r=Q_r*rotor.TSR*rotor.Vinf/rotor.R;
+      /* Update axial induction factor */
+      Ct_r=rotor.NB*T_r/(0.5*atm.rho*2*PI*rotor.R*pow(rotor.Vinf,2));
+      anew=root2nd(4.0,4.0,-Ct_r,1);
+      a_prime_new=(anew*(1+anew))/(pow((rotor.omega*r[i]/rotor.Vinf),2));
+
+      a_old=a;
+      a_prime_old=a_prime;
+      
+      a=0.5*a_old+0.25*anew;
+      a_prime=0.5*a_prime_old+0.25*a_prime_new;
+
+      if (fabs(a-anew) < epsilon || fabs(a_prime-a_prime_new) < epsilon){
+         break;
+      }
+      CT_r=T_r/(atm.rho*pow((rotor.RPM/60),2)*pow(2*rotor.R,4)); 
+      CQ_r=Q_r/(atm.rho*pow((rotor.RPM/60),2)*pow(2*rotor.R,5)); 
+      CP_r=P_r/(atm.rho*pow((rotor.RPM/60),2)*pow(2*rotor.R,5));
+
+      T_sum+=T_r; Q_sum+=Q_r;
+      double Thrustp=rotor.NB*T_sum;printf("Total thrust [N] = %lf\n",Thrustp);
+      double Torquep=rotor.NB*Q_sum;printf("Total torque [Nm] = %lf\n",Torquep);
+      double CTp=Thrustp/(atm.rho*pow((rotor.RPM/60),2)*pow(2*rotor.R,4));
+      printf("CT = %lf\n",CTp);
+      double CQp=Torquep/(atm.rho*pow((rotor.RPM/60),2)*pow(2*rotor.R,5));
+      printf("CQ = %lf\n",CQp);
+      double CPp=2*PI*CQp;
+      printf("CP = %lf\n",CPp);
+      double eta_prop=(CTp/CPp)*rotor.J;
+      printf("Propeller efficiency = %lf\n",eta_prop);
+
+      break;
+    default:
+      BEMT_error("Please specify the run ID: 0-> WT; 1-> Prop\n",thisroutine);
+    }
+
+
+    if(i>1)fprintf(fm,"%8.4f  %8.4f  %8.4f  %8.4f  %8.4f  %8.4f  %8.4f  %8.4f  %8.4f  %8.4f %8.4f  %8.4f\n",r_R[i]\
+             ,a,a_prime,T_r,F_tr,CT_r,CQ_r,CP_r,PhiDeg,alpha,Cl_r,Cd_r);
+  }
+  fclose(fm);
+
+
+  free_dvector(delta_r,0,rotor.BGeom.NumStations);
+  free_dvector(r_R,0,rotor.BGeom.NumStations);
+
+  return;
   }
 
   /* */
